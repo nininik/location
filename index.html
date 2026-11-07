@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NU40 위치 전송</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 24px; background: #f4f6f8; color: #222; }
+  h1 { font-size: 20px; margin-top: 0; }
+  button { width: 100%; padding: 16px; font-size: 18px; border: none; border-radius: 10px; background: #1565c0; color: #fff; }
+  button:disabled { background: #9e9e9e; }
+  .box { margin-top: 16px; background: #fff; border-radius: 10px; padding: 14px; font-size: 16px; line-height: 1.6; }
+  .small { font-size: 13px; color: #666; margin-top: 12px; }
+</style>
+</head>
+<body>
+<h1>NU40 위치 전송</h1>
+<button id="connectBtn">보드 연결 (NU40_GPS 선택)</button>
+<div class="box">
+  <div id="status">상태: 연결 안 됨</div>
+  <div id="coords">위도: -<br>경도: -</div>
+</div>
+<div class="small">
+  위치 권한과 블루투스를 허용해 주세요. 이 페이지는 Android Chrome에서 사용하세요.
+</div>
+
+<script>
+// Nordic UART Service (Adafruit BLEUart와 동일한 UUID)
+const UART_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const UART_RX      = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+const connectBtn = document.getElementById('connectBtn');
+const statusEl   = document.getElementById('status');
+const coordsEl   = document.getElementById('coords');
+
+let rxChar = null;
+let sending = false;
+let lastSent = 0;
+let latest = null;
+
+function setStatus(text) { statusEl.textContent = '상태: ' + text; }
+
+function updateCoords(lat, lon) {
+  coordsEl.innerHTML = '위도: ' + lat.toFixed(5) + '<br>경도: ' + lon.toFixed(5);
+}
+
+async function sendLatest() {
+  if (!rxChar || !latest || sending) return;
+  const now = Date.now();
+  if (now - lastSent < 2000) return;       // 2초마다 한 번만 전송
+  sending = true;
+  try {
+    // 보드가 줄 단위로 읽으므로 끝에 줄바꿈 추가. 기본 MTU 20바이트 이내로 유지
+    const text = latest.lat.toFixed(5) + ',' + latest.lon.toFixed(5) + '\n';
+    await rxChar.writeValueWithoutResponse(new TextEncoder().encode(text));
+    lastSent = now;
+  } catch (e) {
+    setStatus('전송 실패: ' + e.message);
+  } finally {
+    sending = false;
+  }
+}
+
+async function connect() {
+  try {
+    setStatus('장치 검색 중...');
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'NU40' }],
+      optionalServices: [UART_SERVICE],
+    });
+    device.addEventListener('gattserverdisconnected', () => {
+      rxChar = null;
+      setStatus('연결 끊김');
+      connectBtn.disabled = false;
+    });
+
+    setStatus('연결 중...');
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(UART_SERVICE);
+    rxChar = await service.getCharacteristic(UART_RX);
+    setStatus('보드 연결됨, 위치 확인 중...');
+    connectBtn.disabled = true;
+
+    navigator.geolocation.watchPosition(
+      (pos) => {
+        latest = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        updateCoords(latest.lat, latest.lon);
+        setStatus('보드로 전송 중');
+        sendLatest();
+      },
+      (err) => setStatus('위치 오류: ' + err.message),
+      { enableHighAccuracy: true, maximumAge: 0 }
+    );
+  } catch (e) {
+    setStatus('연결 실패: ' + e.message);
+  }
+}
+
+if (!navigator.bluetooth) {
+  setStatus('이 브라우저는 Web Bluetooth를 지원하지 않습니다 (Android Chrome 사용)');
+  connectBtn.disabled = true;
+}
+connectBtn.addEventListener('click', connect);
+</script>
+</body>
+</html>
