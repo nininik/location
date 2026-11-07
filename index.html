@@ -24,6 +24,7 @@
   <div id="nearRegion"></div>
   <div class="dist" id="nearDist">거리: -</div>
   <div id="coords">내 위치: -</div>
+  <div id="tempEl">보드 칩 온도: -</div>
 </div>
 <div class="small">
   위치 권한과 블루투스를 허용해 주세요. 페이지를 열어 둔 채로 두면 연결이 끊겨도 자동으로 다시 연결합니다.
@@ -207,6 +208,7 @@ const nearName   = document.getElementById('nearName');
 const nearRegion = document.getElementById('nearRegion');
 const nearDist   = document.getElementById('nearDist');
 const coordsEl   = document.getElementById('coords');
+const tempEl     = document.getElementById('tempEl');
 
 let device = null;
 let rxChar = null;
@@ -280,6 +282,12 @@ async function handlePosition(pos, force) {
 // 보드가 "REQ"를 보내면 지금 위치를 새로 측정해서 바로 보냄
 function onNotify(event) {
   const text = new TextDecoder().decode(event.target.value);
+  // 보드가 보낸 칩 온도 ("T:23.5")
+  for (const line of text.split(/[\r\n]+/)) {
+    if (line.startsWith('T:')) {
+      tempEl.textContent = '보드 칩 온도: ' + line.slice(2) + ' °C (주변 온도보다 높을 수 있음)';
+    }
+  }
   if (!text.includes('REQ')) return;
   navigator.geolocation.getCurrentPosition(
     (pos) => handlePosition(pos, true),
